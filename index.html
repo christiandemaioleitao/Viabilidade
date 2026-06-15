@@ -885,6 +885,10 @@ td input[type="checkbox"]{
 .auth-msg.success{background:var(--green-light);border:1px solid rgba(5,150,105,.2);color:var(--green);display:block;}
 .auth-brandbar{text-align:center;font-size:11px;color:var(--graphite-soft);margin-top:24px;font-family:var(--mono);letter-spacing:.05em;}
 
+.pass-wrap{position:relative;display:flex;align-items:center;}
+.pass-wrap input{flex:1;padding-right:38px!important;}
+.eye-btn{position:absolute;right:8px;background:none;border:none;cursor:pointer;font-size:15px;color:var(--graphite-soft);padding:0;line-height:1;opacity:.6;}
+.eye-btn:hover{opacity:1;}
 /* ---- dashboard ---- */
 .dash-screen{display:none;min-height:100vh;background:var(--bg);}
 .dash-screen.active{display:block;}
@@ -944,7 +948,7 @@ td input[type="checkbox"]{
       <h1 class="auth-title">Entrar na sua conta</h1>
       <div class="auth-msg" id="login-msg"></div>
       <div class="auth-field"><label>E-mail</label><input type="email" id="login-email" placeholder="seu@email.com" autocomplete="email"></div>
-      <div class="auth-field"><label>Senha</label><input type="password" id="login-pass" placeholder="Sua senha" autocomplete="current-password"></div>
+      <div class="auth-field"><label>Senha</label><div class="pass-wrap"><input type="password" id="login-pass" placeholder="Sua senha" autocomplete="current-password"><button type="button" class="eye-btn" onclick="togglePass('login-pass',this)" tabindex="-1">👁</button></div></div>
       <button class="auth-btn" id="login-btn" onclick="doLogin()">Entrar</button>
       <div class="auth-divider">ou</div>
       <button class="auth-btn-google" onclick="doLoginGoogle()">
@@ -981,7 +985,8 @@ td input[type="checkbox"]{
         <div class="auth-field"><label>Empresa *</label><input type="text" id="reg-empresa" placeholder="Ex.: EBM Incorporadora"></div>
       </div>
       <div class="auth-field"><label>E-mail *</label><input type="email" id="reg-email" placeholder="seu@email.com" autocomplete="email"></div>
-      <div class="auth-field"><label>Senha * (mín. 8 caracteres)</label><input type="password" id="reg-pass" placeholder="Crie uma senha segura" autocomplete="new-password"></div>
+      <div class="auth-field"><label>Senha * (mín. 8 caracteres)</label><div class="pass-wrap"><input type="password" id="reg-pass" placeholder="Crie uma senha segura" autocomplete="new-password"><button type="button" class="eye-btn" onclick="togglePass('reg-pass',this)" tabindex="-1">👁</button></div></div>
+      <div class="auth-field"><label>Confirmar senha *</label><div class="pass-wrap"><input type="password" id="reg-pass2" placeholder="Repita a senha" autocomplete="new-password"><button type="button" class="eye-btn" onclick="togglePass('reg-pass2',this)" tabindex="-1">👁</button></div></div>
       <button class="auth-btn" id="reg-btn" onclick="doRegister()">Criar conta</button>
     </div>
     <div class="auth-footer"><a href="#" onclick="showScreen('screen-login')">← Voltar para o login</a></div>
@@ -5897,6 +5902,12 @@ function authMsg(elId, text, type='error') {
 function authMsgClear(elId) { const el = document.getElementById(elId); if(el){ el.textContent=''; el.className='auth-msg'; } }
 function setBtn(id, label, disabled=false) { const b=document.getElementById(id); if(b){b.textContent=label;b.disabled=disabled;} }
 function fmtCpf(el) { let v=el.value.replace(/\D/g,'').slice(0,11); v=v.replace(/(\d{3})(\d)/,'$1.$2').replace(/(\d{3})\.(\d{3})(\d)/,'$1.$2.$3').replace(/\.(\d{3})(\d)/,'.$1-$2'); el.value=v; }
+function togglePass(inputId, btn) {
+  const inp = document.getElementById(inputId);
+  if (!inp) return;
+  if (inp.type === 'password') { inp.type = 'text'; btn.textContent = '🔒'; }
+  else { inp.type = 'password'; btn.textContent = '👁'; }
+}
 function showToast(msg, ms=3000) { const t=document.getElementById('study-toast'); if(!t) return; t.textContent=msg; t.classList.add('show'); setTimeout(()=>t.classList.remove('show'), ms); }
 function fmtDate(iso) { if(!iso) return '—'; const d=new Date(iso); return d.toLocaleDateString('pt-BR',{day:'2-digit',month:'short',year:'numeric'}); }
 
@@ -5928,8 +5939,10 @@ async function doRegister() {
   const empresa = document.getElementById('reg-empresa').value.trim();
   const email   = document.getElementById('reg-email').value.trim();
   const pass    = document.getElementById('reg-pass').value;
-  if (!nome||!nasc||!cpf||!cargo||!empresa||!email||!pass) { authMsg('register-msg','Preencha todos os campos obrigatórios.'); return; }
+  const pass2   = document.getElementById('reg-pass2').value;
+  if (!nome||!nasc||!cpf||!cargo||!empresa||!email||!pass||!pass2) { authMsg('register-msg','Preencha todos os campos obrigatórios.'); return; }
   if (pass.length < 8) { authMsg('register-msg','A senha deve ter ao menos 8 caracteres.'); return; }
+  if (pass !== pass2) { authMsg('register-msg','As senhas não conferem. Verifique e tente novamente.'); return; }
   setBtn('reg-btn','Criando conta…',true);
   const { data, error } = await supa.auth.signUp({ email, password: pass, options: { emailRedirectTo: window.location.origin } });
   if (error) { setBtn('reg-btn','Criar conta',false); authMsg('register-msg', error.message); return; }
@@ -6011,7 +6024,7 @@ async function logAudit(acao, extra={}) {
    DASHBOARD
    ================================================================ */
 async function dashLoad() {
-  const { data, error } = await supa.from('estudos').select('id,nome,descricao,created_at,updated_at').order('updated_at',{ascending:false});
+  const { data, error } = await supa.from('estudos').select('id,nome,descricao,created_at,updated_at').is('deleted_at',null).order('updated_at',{ascending:false});
   if (error) { console.error('dashLoad:', error); return; }
   estudosDash = data || [];
   dashRender(estudosDash);
@@ -6084,7 +6097,17 @@ async function dashAbrirEstudo(id) {
 }
 
 async function voltarDashboard() {
-  await estudoSalvar(false);
+  const badge = document.getElementById('save-badge');
+  const hasUnsaved = badge && !badge.textContent.includes('✓') && badge.textContent !== '—' && badge.textContent !== '';
+  if (hasUnsaved) {
+    if (!confirm('Há alterações não salvas. Deseja salvar antes de sair?')) {
+      // Sair sem salvar
+    } else {
+      await estudoSalvar(true);
+    }
+  } else {
+    await estudoSalvar(false);
+  }
   document.getElementById('app-shell').style.display = 'none';
   document.getElementById('viab-bar').style.display  = 'none';
   await dashLoad();
@@ -6117,6 +6140,8 @@ function setSaveBadge(status) {
   el.className = 'save-badge ' + status;
 }
 
+// Marca dirty sempre que renderAll é chamado e há um estudo aberto
+const _origRenderAll = typeof renderAll === 'function' ? renderAll : null;
 // Auto-save a cada 60s quando o viabilizador está aberto
 setInterval(()=>{ if(estudoAtual && document.getElementById('app-shell')?.style.display==='block') estudoSalvar(false); }, 60000);
 
