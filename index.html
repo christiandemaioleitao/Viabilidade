@@ -1045,14 +1045,14 @@ td input[type="checkbox"]{
   <div class="dash-body">
     <div class="dash-header">
       <div>
-        <h1>Meus Estudos</h1>
-        <p>Estudos de viabilidade imobiliária</p>
+        <h1>Meus Projetos</h1>
+        <p>Projetos de viabilidade imobiliária em que você está trabalhando</p>
       </div>
       <div style="display:flex;gap:10px;align-items:center">
-        <input type="text" class="dash-search" id="dash-search" placeholder="Buscar estudos…" oninput="dashFilter(this.value)">
+        <input type="text" class="dash-search" id="dash-search" placeholder="Buscar projetos…" oninput="dashFilter(this.value)">
         <button class="btn btn-primary" onclick="dashNewEstudo()">
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-          Novo estudo
+          Novo projeto
         </button>
       </div>
     </div>
@@ -2415,6 +2415,15 @@ let state = {
 
   locked: { terreno:false, prem:false, incc:false, grupos:false, dados:false, fases:false, permuta:false, despesas:false, centros:false, socios:false, unidades:false, parcelas:false, bandas:false, curva:false, obra:false, obracurva:false, fin:false, fincurva:false }
 };
+
+// Snapshot dos valores padrão do estado. Usado para resetar o 'state' ao abrir/criar
+// um estudo, evitando que dados de um projeto vazem para outro (bug de contaminação).
+const STATE_DEFAULT_JSON = JSON.stringify(state);
+function resetStateToDefault(){
+  const def = JSON.parse(STATE_DEFAULT_JSON);
+  Object.keys(state).forEach(k => { delete state[k]; });
+  Object.assign(state, def);
+}
 
 // ================================================================
 //  CONSTANTES / HELPERS
@@ -6041,14 +6050,14 @@ function dashRender(list) {
   if (!grid) return;
   let html = `<div class="dash-card new-card" onclick="dashNewEstudo()">
     <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="1.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-    <div style="font-size:14px;font-weight:600;color:var(--accent)">Novo estudo</div>
+    <div style="font-size:14px;font-weight:600;color:var(--accent)">Novo projeto</div>
     <div style="font-size:12px;color:var(--graphite-soft)">Criar viabilidade em branco</div>
   </div>`;
   if (!list.length) {
     html += `<div class="dash-empty" style="grid-column:1/-1">
       <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1"><rect x="3" y="3" width="18" height="18" rx="3"/><path d="M3 9h18M9 21V9"/></svg>
-      <h3>Nenhum estudo ainda</h3>
-      <p>Clique em "Novo estudo" para começar.</p>
+      <h3>Nenhum projeto ainda</h3>
+      <p>Clique em "Novo projeto" para começar.</p>
     </div>`;
   } else {
     html += list.map(e => `<div class="dash-card" onclick="dashAbrirEstudo('${e.id}')">
@@ -6071,7 +6080,10 @@ function dashRender(list) {
 function esc(s){ return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
 
 async function dashNewEstudo() {
-  const { data, error } = await supa.from('estudos').insert({ user_id: supaUser.id, nome: 'Novo Estudo', state_json: {} }).select().single();
+  let nome = prompt('Dê um nome para o novo projeto:', 'Novo Estudo');
+  if (nome === null) return;            // usuário cancelou
+  nome = nome.trim() || 'Novo Estudo';
+  const { data, error } = await supa.from('estudos').insert({ user_id: supaUser.id, nome, state_json: {} }).select().single();
   if (error) { showToast('Erro ao criar estudo.'); return; }
   await logAudit('criacao_estudo', { estudo_id: data.id });
   await dashAbrirEstudo(data.id);
@@ -6081,7 +6093,10 @@ async function dashAbrirEstudo(id) {
   const { data, error } = await supa.from('estudos').select('*').eq('id',id).single();
   if (error) { showToast('Erro ao abrir estudo.'); return; }
   estudoAtual = data;
-  // Restaura o state se houver
+  // Reseta o state para o padrão antes de restaurar, evitando vazamento de dados
+  // de um estudo aberto anteriormente (inclui estudos novos/vazios).
+  resetStateToDefault();
+  // Restaura o state salvo, se houver
   if (data.state_json && Object.keys(data.state_json).length > 0) {
     try { Object.assign(state, data.state_json); } catch(e) { console.warn('Erro ao restaurar state:', e); }
   }
@@ -6093,18 +6108,16 @@ async function dashAbrirEstudo(id) {
   document.getElementById('app-shell').style.display = 'block';
   document.getElementById('viab-bar').style.display  = 'flex';
   renderAll();
+  _dirty = false; // recém-aberto: sem alterações pendentes
   await logAudit('abertura_estudo', {});
 }
 
 async function voltarDashboard() {
-  const badge = document.getElementById('save-badge');
-  const hasUnsaved = badge && !badge.textContent.includes('✓') && badge.textContent !== '—' && badge.textContent !== '';
-  if (hasUnsaved) {
-    if (!confirm('Há alterações não salvas. Deseja salvar antes de sair?')) {
-      // Sair sem salvar
-    } else {
+  if (_dirty) {
+    if (confirm('Há alterações não salvas. Deseja salvar antes de sair?')) {
       await estudoSalvar(true);
     }
+    // se cancelar, sai sem salvar
   } else {
     await estudoSalvar(false);
   }
@@ -6116,17 +6129,19 @@ async function voltarDashboard() {
 
 async function estudoRenomear(novoNome) {
   if (!estudoAtual || !novoNome.trim()) return;
+  if (estudoAtual.nome === novoNome.trim()) return;   // sem mudança real
   estudoAtual.nome = novoNome.trim();
   setSaveBadge('saving');
-  const { error } = await supa.from('estudos').update({ nome: novoNome.trim() }).eq('id', estudoAtual.id);
+  const { error } = await supa.from('estudos').update({ nome: novoNome.trim(), updated_at: new Date().toISOString() }).eq('id', estudoAtual.id);
   if (!error) { setSaveBadge('saved'); await logAudit('edicao_nome_estudo', { novo_nome: novoNome.trim() }); }
 }
 
 async function estudoSalvar(showFeedback=true) {
   if (!estudoAtual) return;
   setSaveBadge('saving');
-  const { error } = await supa.from('estudos').update({ state_json: state, nome: estudoAtual.nome }).eq('id', estudoAtual.id);
+  const { error } = await supa.from('estudos').update({ state_json: state, nome: estudoAtual.nome, updated_at: new Date().toISOString() }).eq('id', estudoAtual.id);
   if (error) { setSaveBadge(''); if(showFeedback) showToast('Erro ao salvar.'); return; }
+  _dirty = false;   // salvo: sem alterações pendentes
   setSaveBadge('saved');
   if (showFeedback) showToast('Estudo salvo!');
   await logAudit('salvamento_estudo', {});
@@ -6140,10 +6155,25 @@ function setSaveBadge(status) {
   el.className = 'save-badge ' + status;
 }
 
-// Marca dirty sempre que renderAll é chamado e há um estudo aberto
-const _origRenderAll = typeof renderAll === 'function' ? renderAll : null;
-// Auto-save a cada 60s quando o viabilizador está aberto
-setInterval(()=>{ if(estudoAtual && document.getElementById('app-shell')?.style.display==='block') estudoSalvar(false); }, 60000);
+// ---- Detecção de alterações não salvas (dirty) ----
+let _dirty = false;
+function _markDirty(){ if (estudoAtual && document.getElementById('app-shell')?.style.display==='block') _dirty = true; }
+(function attachDirtyListeners(){
+  const shell = document.getElementById('app-shell');
+  if (!shell) return;
+  shell.addEventListener('input',  _markDirty, true);
+  shell.addEventListener('change', _markDirty, true);
+})();
+
+// Auto-save a cada 60s quando o viabilizador está aberto e há alterações pendentes
+setInterval(()=>{
+  if (estudoAtual && _dirty && document.getElementById('app-shell')?.style.display==='block') estudoSalvar(false);
+}, 60000);
+
+// Aviso ao tentar sair do site (fechar/recarregar aba) com alterações não salvas
+window.addEventListener('beforeunload', (e)=>{
+  if (estudoAtual && _dirty) { e.preventDefault(); e.returnValue = ''; }
+});
 
 async function dashDuplicar(id) {
   const { data, error } = await supa.from('estudos').select('*').eq('id',id).single();
